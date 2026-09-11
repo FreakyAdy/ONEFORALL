@@ -7,7 +7,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js 18+](https://img.shields.io/badge/node-18%2B-green.svg)](https://nodejs.org)
-[![npm](https://img.shields.io/badge/npm-oneforall--ai-red.svg)](https://www.npmjs.com/package/oneforall-ai)
+[![Install via GitHub](https://img.shields.io/badge/install-github%3AFreakyAdy%2FONEFORALL-blue.svg)](#-installation)
+[![Tests](https://img.shields.io/badge/tests-10%2F10%20passing-brightgreen.svg)](#-testing--verification)
 [![Contributing Guide](https://img.shields.io/badge/contributing-guide-blue.svg)](CONTRIBUTING.md)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#-quick-start)
 
@@ -19,7 +20,7 @@
   <a href="#-quick-start">Quick Start</a> •
   <a href="#-complete-command-reference">Commands</a> •
   <a href="#-real-world-walkthrough-full-team-workflow">Walkthrough</a> •
-  <a href="#-what-gets-generated-and-why">Generated Files</a> •
+  <a href="#-testing--verification">Tests</a> •
   <a href="#-faq">FAQ</a>
 </p>
 
@@ -249,15 +250,19 @@ ofa --version
 # 1. Navigate to your project
 cd your-project
 
-# 2. Initialize (scans structure, generates everything)
-ofa init
+# 2. Set your GitHub username (stored locally in .ofa/identity)
+ofa whoami --set your-github-handle
 
-# 3. Claim your zone
-ofa claim backend --user your-github-username
+# 3. Initialize (scans structure, generates all AI configs & CODEOWNERS)
+ofa init --yes
 
-# 4. Commit the generated files
-git add .
-git commit -m "chore: add ONEFORALL AI collaboration configs"
+# 4. Claim your zone and auto-commit
+ofa claim backend --commit
+
+# 5. Verify your setup with doctor
+ofa doctor
+
+# 6. Push to GitHub
 git push
 ```
 
@@ -266,6 +271,19 @@ That's it. Every AI agent in your project now knows who owns what.
 ---
 
 ## 📋 Complete Command Reference
+
+| Command | What it does | Key Flags |
+| :--- | :--- | :--- |
+| [`ofa init`](#ofa-init--initialize-oneforall) | Scans project structure, detects zones, generates all AI configs | `-y, --yes`, `--force` |
+| [`ofa claim <zone>`](#ofa-claim-zone--claim-a-zone) | Locks a zone for you, updates all AI instructions & CODEOWNERS | `-u, --user`, `--ttl`, `--commit` |
+| [`ofa release <zone>`](#ofa-release-zone--release-a-zone) | Unlocks a zone (verifies owner; supports force release) | `-u, --user`, `--force`, `--commit` |
+| [`ofa status`](#ofa-status--show-ownership-dashboard) | Terminal dashboard of active locks, owners, and rules | `--json` |
+| [`ofa guard`](#ofa-guard--check-ownership-boundaries) | Boundary check preventing out-of-zone edits (local & CI) | `--staged`, `--strict`, `-u, --user` |
+| [`ofa sync`](#ofa-sync--regenerate-all-configs) | Regenerates all platform configs from `.ofa/config.yml` | `--commit` |
+| [`ofa whoami`](#ofa-whoami--developer-identity) | Views or configures persistent developer GitHub identity | `--set <handle>`, `--clear` |
+| [`ofa doctor`](#ofa-doctor--diagnostic-self-check) | System diagnostics: verifies CLI, identity, zones & engine | |
+
+---
 
 ### `ofa init` — Initialize ONEFORALL
 
@@ -315,10 +333,13 @@ Locks a zone for a developer. All AI config files are regenerated immediately so
 # Claim with explicit username
 ofa claim backend --user alice
 
+# Claim and auto-commit to git (never auto-pushes)
+ofa claim backend --commit
+
 # Claim with custom TTL (auto-expires after 48 hours)
 ofa claim frontend --user bob --ttl 48
 
-# If no --user is provided, ofa tries to read your git user.name
+# If you previously set your identity via `ofa whoami --set <handle>`, no --user is needed:
 ofa claim backend
 ```
 
@@ -335,10 +356,12 @@ ofa claim backend
 ```
 
 **What happens when you claim:**
-1. The zone's `owner` field in `.ofa/config.yml` is set to your username
-2. A lock entry is created with a `claimed_at` timestamp and `expires_at` TTL
-3. **All AI config files are regenerated** — every platform immediately sees the change
-4. `CODEOWNERS` is updated so GitHub requires your review for PRs touching your zone
+1. The developer's GitHub handle is validated (rejects spaces to protect `CODEOWNERS` syntax)
+2. The zone's `owner` field in `.ofa/config.yml` is set to your handle
+3. A lock entry is created with a `claimed_at` timestamp and `expires_at` TTL
+4. **All AI config files are regenerated** — every platform immediately sees the change
+5. `CODEOWNERS` is updated so GitHub requires your review for PRs touching your zone
+6. If `--commit` was passed, the updated config and AI rules are staged and committed to git
 
 **Conflict handling:**
 
@@ -364,17 +387,42 @@ $ ofa claim backend --user alice --ttl 48
 
 ### `ofa release <zone>` — Release a zone
 
-Unlocks a zone, making it available for others to claim.
+Unlocks a zone, making it available for others to claim. Includes ownership verification to prevent accidental releases of another developer's zone.
 
 ```bash
+# Release your claimed zone (uses resolved identity)
 ofa release backend
+
+# Release with explicit username
+ofa release backend --user alice
+
+# Force-release another user's zone (e.g., if a teammate went offline)
+ofa release backend --force
+
+# Release and automatically commit changes
+ofa release backend --commit
 ```
 
-**Example output:**
+**Refusal when releasing another developer's zone:**
 
+```bash
+$ ofa release backend --user bob
+```
 ```text
+  ✖ Zone "backend" is owned by @alice, not @bob.
+     To force-release, run: ofa release backend --force
+```
+
+**Force release example:**
+
+```bash
+$ ofa release backend --force
+```
+```text
+  ⚠️  --force specified: bypassing ownership check.
+
   🔓 Releasing zone "backend"...
-  ✔ Zone "backend" released by @alice. It's now available.
+  ✔ Zone "backend" force-released (was owned by @alice). It's now available.
   📝 Updating AI config files...
   ✔ All config files updated.
 ```
@@ -1049,6 +1097,31 @@ rules:
 ```
 
 These rules are included in every generated AI config file.
+
+---
+
+## 🧪 Testing & Verification
+
+ONEFORALL comes with a built-in test suite powered by `node:test` (requires Node 18+, zero external testing dependencies):
+
+```bash
+# Run all unit and boundary tests
+npm test
+```
+
+```text
+✔ isValidGithubHandle - validates legitimate GitHub handles
+✔ isValidGithubHandle - rejects invalid handles
+✔ setStoredIdentity / getStoredIdentity / clearStoredIdentity
+✔ resolveIdentity - Priority 1: --user flag overrides everything
+✔ resolveIdentity - Priority 2: OFA_PR_AUTHOR in CI when no --user flag
+✔ resolveIdentity - Priority 3: stored identity when no flag and no CI env
+✔ fileInZone - boundary matching prevents prefix overlap (Bug #6)
+✔ claimZone - claiming, conflicts, and TTL refresh
+✔ releaseZone - ownership verification and force release (Bug #5)
+✔ checkBoundaryViolations - enforcement logic
+ℹ tests 10 pass 10 fail 0
+```
 
 ---
 
