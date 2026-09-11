@@ -69,6 +69,19 @@ export function writeConfig(projectRoot, config) {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
+
+  // Normalize zone paths to always end in '/' to avoid prefix matching bugs
+  if (config && config.zones) {
+    for (const zone of Object.values(config.zones)) {
+      if (Array.isArray(zone.paths)) {
+        zone.paths = zone.paths.map(p => {
+          const normalized = p.replace(/\\/g, '/');
+          return normalized.endsWith('/') ? normalized : `${normalized}/`;
+        });
+      }
+    }
+  }
+
   const raw = yaml.dump(config, {
     indent: 2,
     lineWidth: 120,

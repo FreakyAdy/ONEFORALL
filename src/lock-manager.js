@@ -85,7 +85,7 @@ export function claimZone(projectRoot, zoneName, username, ttlHours = 24) {
  * @param {string} [username] - If provided, only release if owned by this user
  * @returns {{ success: boolean, message: string }}
  */
-export function releaseZone(projectRoot, zoneName, username) {
+export function releaseZone(projectRoot, zoneName, username, force = false) {
   const config = readConfig(projectRoot);
   if (!config) {
     return { success: false, message: 'No .ofa/config.yml found. Run "ofa init" first.' };
@@ -101,7 +101,7 @@ export function releaseZone(projectRoot, zoneName, username) {
     return { success: false, message: `Zone "${zoneName}" is not claimed by anyone.` };
   }
 
-  if (username && zone.owner !== username) {
+  if (!force && username && zone.owner !== username) {
     return {
       success: false,
       message: `Zone "${zoneName}" is owned by @${zone.owner}, not @${username}.`,
@@ -119,7 +119,9 @@ export function releaseZone(projectRoot, zoneName, username) {
 
   return {
     success: true,
-    message: `Zone "${zoneName}" released by @${previousOwner}. It's now available.`,
+    message: force && previousOwner !== username
+      ? `Zone "${zoneName}" force-released (was owned by @${previousOwner}). It's now available.`
+      : `Zone "${zoneName}" released by @${previousOwner}. It's now available.`,
   };
 }
 
@@ -160,7 +162,10 @@ export function getOwnershipStatus(projectRoot) {
 export function fileInZone(filePath, zone) {
   const normalizedFile = filePath.replace(/\\/g, '/');
   for (const zonePath of zone.paths) {
-    const normalizedZone = zonePath.replace(/\\/g, '/');
+    let normalizedZone = zonePath.replace(/\\/g, '/');
+    if (!normalizedZone.endsWith('/')) {
+      normalizedZone += '/';
+    }
     if (normalizedFile.startsWith(normalizedZone) || normalizedFile === normalizedZone.slice(0, -1)) {
       return true;
     }

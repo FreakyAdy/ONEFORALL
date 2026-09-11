@@ -236,8 +236,8 @@ Even if an AI agent ignores the instructions (they sometimes do), `ofa guard` ca
 ### Installation
 
 ```bash
-# Install globally via npm (works on Windows, macOS, Linux)
-npm install -g oneforall-ai
+# Install globally from GitHub (works on Windows, macOS, Linux)
+npm install -g github:FreakyAdy/ONEFORALL
 
 # Verify installation
 ofa --version
@@ -530,7 +530,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npm install -g oneforall-ai
+      - run: npm install -g github:FreakyAdy/ONEFORALL
       - run: ofa guard --strict
 ```
 
@@ -541,7 +541,11 @@ jobs:
 After you manually edit `.ofa/config.yml` (add zones, change paths, update rules), run `ofa sync` to regenerate all AI config files.
 
 ```bash
+# Sync config files
 ofa sync
+
+# Sync and auto-commit to git
+ofa sync --commit
 ```
 
 ```text
@@ -556,6 +560,51 @@ ofa sync
   ✔ .github/workflows/ofa-guard.yml
 
   ✅ Synced 7 config file(s). All AI agents are up to date!
+```
+
+---
+
+### `ofa whoami` — Developer identity
+
+Check or set your persistent GitHub handle for ONEFORALL commands.
+
+```bash
+# View current resolved identity and source
+ofa whoami
+
+# Set your official GitHub username (saved to .ofa/identity)
+ofa whoami --set your-github-handle
+
+# Clear stored identity
+ofa whoami --clear
+```
+
+**Identity Resolution Order:**
+1. Explicit `--user <handle>` flag (highest priority)
+2. CI environment variable `OFA_PR_AUTHOR` (in pull request workflows)
+3. Stored identity in `.ofa/identity`
+4. `git config user.name` (last resort fallback, validated for GitHub handle syntax)
+
+---
+
+### `ofa doctor` — Diagnostic self-check
+
+Run instant diagnostics to verify CLI health, identity resolution, zone configuration, and run a synthetic test of boundary protection.
+
+```bash
+ofa doctor
+```
+
+```text
+  🩺 ONEFORALL Doctor — System Diagnostics
+  Running health checks on your setup...
+
+  ✔ [CLI] ONEFORALL v0.1.0 is installed and executable
+  ✔ [Identity] Active handle @alice (source: stored)
+  ✔ [Config] All 3 zone owners are valid GitHub handles
+  ✔ [Engine] Synthetic boundary check and path isolation passed
+
+  ✅ All checks passed! ONEFORALL is fully configured and ready.
 ```
 
 ---

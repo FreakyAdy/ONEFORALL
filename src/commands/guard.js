@@ -9,8 +9,9 @@ import chalk from 'chalk';
 import { simpleGit } from 'simple-git';
 import { findProjectRoot, readConfig } from '../config.js';
 import { checkBoundaryViolations } from '../lock-manager.js';
+import { resolveIdentity } from '../identity.js';
 
-export async function guardCommand(options) {
+export async function guardCommand(options = {}) {
   const projectRoot = findProjectRoot();
   const config = readConfig(projectRoot);
 
@@ -21,14 +22,12 @@ export async function guardCommand(options) {
 
   const git = simpleGit(projectRoot);
 
-  // Determine the current user
-  let currentUser;
-  try {
-    const gitUser = await git.getConfig('user.name');
-    currentUser = gitUser.value;
-  } catch {
-    currentUser = process.env.OFA_PR_AUTHOR || 'unknown';
+  // Determine the current user via shared identity resolver
+  const identity = await resolveIdentity(options, projectRoot);
+  if (identity.warning && identity.source === 'git') {
+    console.log(chalk.yellow(`  ⚠️  ${identity.warning}`));
   }
+  const currentUser = identity.handle || 'unknown';
 
   // Get changed files
   let changedFiles = [];

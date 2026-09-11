@@ -59,7 +59,7 @@ jobs:
           node-version: '20'
 
       - name: Install ONEFORALL
-        run: npm install -g oneforall-ai
+        run: npm install -g github:FreakyAdy/ONEFORALL
 
       - name: Get changed files
         id: changed

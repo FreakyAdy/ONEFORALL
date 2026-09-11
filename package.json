@@ -15,11 +15,11 @@
     "workflow",
     "cli"
   ],
-  "author": "",
+  "author": "FreakyAdy",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": ""
+    "url": "https://github.com/FreakyAdy/ONEFORALL.git"
   },
   "bin": {
     "ofa": "./bin/ofa.js"

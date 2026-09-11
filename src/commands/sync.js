@@ -7,10 +7,11 @@
 
 import chalk from 'chalk';
 import path from 'path';
+import { simpleGit } from 'simple-git';
 import { findProjectRoot, readConfig } from '../config.js';
 import { generateAllConfigs } from './init.js';
 
-export async function syncCommand() {
+export async function syncCommand(options = {}) {
   const projectRoot = findProjectRoot();
   const config = readConfig(projectRoot);
 
@@ -28,6 +29,19 @@ export async function syncCommand() {
   for (const file of generated) {
     const relative = path.relative(projectRoot, file);
     console.log(chalk.green('  ✔ ') + chalk.dim(relative));
+  }
+
+  // If --commit is requested, stage and commit the changes
+  if (options.commit) {
+    try {
+      const git = simpleGit(projectRoot);
+      const filesToStage = ['.ofa/config.yml', ...generated.map(f => path.relative(projectRoot, f).replace(/\\/g, '/'))];
+      await git.add(filesToStage);
+      await git.commit('chore(ofa): sync AI configs and ownership map');
+      console.log(chalk.green('  ✔ Committed config and AI files to git.'));
+    } catch (err) {
+      console.log(chalk.yellow(`  ⚠️  Failed to commit changes: ${err.message}`));
+    }
   }
 
   console.log('');
