@@ -1,0 +1,46 @@
+{
+  "name": "oneforall-ai",
+  "version": "0.1.0",
+  "description": "Universal AI collaboration tool for GitHub teams — lets multiple developers and their AI agents work on the same repo without merge conflicts",
+  "keywords": [
+    "ai",
+    "collaboration",
+    "github",
+    "merge-conflicts",
+    "cursor",
+    "copilot",
+    "gemini",
+    "claude",
+    "codeowners",
+    "workflow",
+    "cli"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "bin": {
+    "ofa": "./bin/ofa.js"
+  },
+  "main": "src/index.js",
+  "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node bin/ofa.js",
+    "test": "node --test test/**/*.test.js",
+    "lint": "echo \"No linter configured yet\""
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "glob": "^11.0.0",
+    "inquirer": "^9.3.0",
+    "js-yaml": "^4.1.0",
+    "simple-git": "^3.25.0"
+  },
+  "devDependencies": {}
+}
