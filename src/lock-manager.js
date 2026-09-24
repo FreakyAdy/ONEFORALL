@@ -1,11 +1,7 @@
-/**
- * Lock Manager — manages zone ownership and file locks
- *
- * Handles claiming/releasing zones, TTL-based auto-expiry, and
- * conflict detection when multiple developers try to claim the same zone.
- */
-
-import { readConfig, writeConfig } from './config.js';
+import { readConfig } from './config.js';
+import { getState, acquireLease, releaseLease } from './engine/state.js';
+import picomatch from 'picomatch';
+import path from 'path';
 
 /**
  * Claim a zone for a developer.
@@ -14,15 +10,15 @@ import { readConfig, writeConfig } from './config.js';
  * @param {string} zoneName
  * @param {string} username - GitHub username
  * @param {number} ttlHours - Auto-release after N hours
- * @returns {{ success: boolean, message: string }}
+ * @returns {Promise<{ success: boolean, message: string }>}
  */
-export function claimZone(projectRoot, zoneName, username, ttlHours = 24) {
+export async function claimZone(projectRoot, zoneName, username, ttlHours = 24) {
   const config = readConfig(projectRoot);
   if (!config) {
     return { success: false, message: 'No .ofa/config.yml found. Run "ofa init" first.' };
   }
 
-  // Check zone exists
+  // Check zone exists in policy
   if (!config.zones[zoneName]) {
     const available = Object.keys(config.zones).join(', ');
     return {
@@ -31,50 +27,15 @@ export function claimZone(projectRoot, zoneName, username, ttlHours = 24) {
     };
   }
 
-  // Purge expired locks first
-  purgeExpiredLocks(config);
-
-  const zone = config.zones[zoneName];
-
-  // Check if already claimed by someone else
-  if (zone.owner && zone.owner !== username) {
-    return {
-      success: false,
-      message: `Zone "${zoneName}" is already claimed by @${zone.owner}. They must release it first, or wait for TTL expiry.`,
-    };
-  }
-
-  // Check if already claimed by this user
-  if (zone.owner === username) {
-    // Refresh the TTL
-    updateLockTTL(config, zoneName, ttlHours);
-    writeConfig(projectRoot, config);
-    return {
-      success: true,
-      message: `Zone "${zoneName}" TTL refreshed for @${username} (expires in ${ttlHours}h).`,
-    };
-  }
-
-  // Claim it
-  zone.owner = username;
-  zone.claimed_at = new Date().toISOString();
-
-  // Add to locks array
-  config.locks = config.locks || [];
-  config.locks.push({
+  const lease = {
     zone: zoneName,
     owner: username,
-    claimed_at: zone.claimed_at,
     expires_at: new Date(Date.now() + ttlHours * 60 * 60 * 1000).toISOString(),
-    ttl_hours: ttlHours,
-  });
-
-  writeConfig(projectRoot, config);
-
-  return {
-    success: true,
-    message: `Zone "${zoneName}" claimed by @${username} (expires in ${ttlHours}h).`,
+    ttl_hours: ttlHours
   };
+
+  const result = await acquireLease(lease, projectRoot);
+  return { success: result.success, message: result.message };
 }
 
 /**
@@ -83,68 +44,42 @@ export function claimZone(projectRoot, zoneName, username, ttlHours = 24) {
  * @param {string} projectRoot
  * @param {string} zoneName
  * @param {string} [username] - If provided, only release if owned by this user
- * @returns {{ success: boolean, message: string }}
+ * @returns {Promise<{ success: boolean, message: string }>}
  */
-export function releaseZone(projectRoot, zoneName, username, force = false) {
+export async function releaseZone(projectRoot, zoneName, username, force = false) {
   const config = readConfig(projectRoot);
   if (!config) {
     return { success: false, message: 'No .ofa/config.yml found. Run "ofa init" first.' };
   }
 
   if (!config.zones[zoneName]) {
-    return { success: false, message: `Zone "${zoneName}" does not exist.` };
+    return { success: false, message: `Zone "${zoneName}" does not exist in policy.` };
   }
 
-  const zone = config.zones[zoneName];
-
-  if (!zone.owner) {
-    return { success: false, message: `Zone "${zoneName}" is not claimed by anyone.` };
-  }
-
-  if (!force && username && zone.owner !== username) {
-    return {
-      success: false,
-      message: `Zone "${zoneName}" is owned by @${zone.owner}, not @${username}.`,
-    };
-  }
-
-  const previousOwner = zone.owner;
-  zone.owner = null;
-  delete zone.claimed_at;
-
-  // Remove from locks array
-  config.locks = (config.locks || []).filter(l => l.zone !== zoneName);
-
-  writeConfig(projectRoot, config);
-
-  return {
-    success: true,
-    message: force && previousOwner !== username
-      ? `Zone "${zoneName}" force-released (was owned by @${previousOwner}). It's now available.`
-      : `Zone "${zoneName}" released by @${previousOwner}. It's now available.`,
-  };
+  const result = await releaseLease(zoneName, username, force, projectRoot);
+  return { success: result.success, message: result.message };
 }
 
 /**
  * Get a summary of all zone ownership status.
  */
-export function getOwnershipStatus(projectRoot) {
+export async function getOwnershipStatus(projectRoot) {
   const config = readConfig(projectRoot);
   if (!config) return null;
 
-  purgeExpiredLocks(config);
-  writeConfig(projectRoot, config);
+  const state = await getState(projectRoot);
+  const locks = state.locks || [];
 
   const zones = [];
   for (const [name, zone] of Object.entries(config.zones)) {
-    const lock = (config.locks || []).find(l => l.zone === name);
+    const lock = locks.find(l => l.zone === name);
     zones.push({
       name,
       paths: zone.paths,
       description: zone.description,
-      owner: zone.owner || null,
-      claimed_at: zone.claimed_at || null,
-      expires_at: lock?.expires_at || null,
+      owner: lock ? lock.owner : null,
+      claimed_at: lock ? lock.claimed_at : null,
+      expires_at: lock ? lock.expires_at : null,
       require_all_owners: zone.require_all_owners || false,
     });
   }
@@ -161,15 +96,30 @@ export function getOwnershipStatus(projectRoot) {
  */
 export function fileInZone(filePath, zone) {
   const normalizedFile = filePath.replace(/\\/g, '/');
+
   for (const zonePath of zone.paths) {
     let normalizedZone = zonePath.replace(/\\/g, '/');
-    if (!normalizedZone.endsWith('/')) {
-      normalizedZone += '/';
+
+    // Check if the user specified a directory path without a trailing slash (which was valid before)
+    // We treat it as a directory if it doesn't contain glob stars and doesn't look like a specific file with an extension
+    if (!normalizedZone.endsWith('/') && !normalizedZone.includes('*') && !path.extname(normalizedZone)) {
+        normalizedZone += '/';
     }
-    if (normalizedFile.startsWith(normalizedZone) || normalizedFile === normalizedZone.slice(0, -1)) {
-      return true;
+
+    // If the path looks like a directory, treat it as a glob matching anything inside
+    if (normalizedZone.endsWith('/')) {
+      const glob = normalizedZone + '**/*';
+      if (picomatch.isMatch(normalizedFile, [glob, normalizedZone.slice(0, -1)])) {
+        return true;
+      }
+    } else {
+      // If it's a specific file or a glob pattern
+      if (picomatch.isMatch(normalizedFile, normalizedZone)) {
+        return true;
+      }
     }
   }
+
   return false;
 }
 
@@ -177,13 +127,14 @@ export function fileInZone(filePath, zone) {
  * Given a list of changed files, check which zones they belong to and if
  * the current user is allowed to modify them.
  *
- * @returns {{ violations: Array, warnings: Array }}
+ * @returns {Promise<{ violations: Array, warnings: Array }>}
  */
-export function checkBoundaryViolations(projectRoot, changedFiles, currentUser) {
+export async function checkBoundaryViolations(projectRoot, changedFiles, currentUser) {
   const config = readConfig(projectRoot);
   if (!config) return { violations: [], warnings: [] };
 
-  purgeExpiredLocks(config);
+  const state = await getState(projectRoot);
+  const locks = state.locks || [];
 
   const violations = [];
   const warnings = [];
@@ -210,56 +161,33 @@ export function checkBoundaryViolations(projectRoot, changedFiles, currentUser) 
       continue;
     }
 
+    const lock = locks.find(l => l.zone === fileZoneName);
+
     // Check if the zone is claimed by someone else
-    if (fileZone.owner && fileZone.owner !== currentUser) {
+    if (lock && lock.owner !== currentUser) {
       violations.push({
         file,
         zone: fileZoneName,
-        owner: fileZone.owner,
-        message: `File is in zone "${fileZoneName}" owned by @${fileZone.owner}. You (@${currentUser}) cannot modify it.`,
+        owner: lock.owner,
+        message: `File is in zone "${fileZoneName}" owned by @${lock.owner}. You (@${currentUser}) cannot modify it.`,
       });
     }
 
     // Check shared zones
     if (fileZone.require_all_owners) {
-      const activeOwners = Object.entries(config.zones)
-        .filter(([_, z]) => z.owner && !z.require_all_owners)
-        .map(([_, z]) => z.owner);
+      const activeOwners = locks
+        .filter(l => !config.zones[l.zone]?.require_all_owners)
+        .map(l => l.owner);
 
       if (activeOwners.length > 0 && !activeOwners.includes(currentUser)) {
         warnings.push({
           file,
           zone: fileZoneName,
-          message: `File is in shared zone "${fileZoneName}" — changes require review from: ${activeOwners.map(o => '@' + o).join(', ')}`,
+          message: `File is in shared zone "${fileZoneName}" — changes require review from: ${[...new Set(activeOwners)].map(o => '@' + o).join(', ')}`,
         });
       }
     }
   }
 
   return { violations, warnings };
-}
-
-// ── Internal helpers ────────────────────────────────────────────────────
-
-function purgeExpiredLocks(config) {
-  const now = new Date();
-  config.locks = (config.locks || []).filter(lock => {
-    if (new Date(lock.expires_at) <= now) {
-      // Expired — clear the zone owner
-      if (config.zones[lock.zone]) {
-        config.zones[lock.zone].owner = null;
-        delete config.zones[lock.zone].claimed_at;
-      }
-      return false;
-    }
-    return true;
-  });
-}
-
-function updateLockTTL(config, zoneName, ttlHours) {
-  const lock = (config.locks || []).find(l => l.zone === zoneName);
-  if (lock) {
-    lock.expires_at = new Date(Date.now() + ttlHours * 60 * 60 * 1000).toISOString();
-    lock.ttl_hours = ttlHours;
-  }
 }
