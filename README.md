@@ -901,6 +901,15 @@ rules:
 
 **Customizing zones:** You can add custom zones, change paths, or add new rules by editing this file directly. Then run `ofa sync` to regenerate all AI configs.
 
+**Generate Zones with AI:** You can use the following prompt with ChatGPT/Claude/Gemini to quickly generate a structured zones block for your team:
+
+> "Create a sectioned directory of different zones according to our project and team requirements. Further divide these zones based on their individual roles.
+>
+> **Project Zones/Areas:** [Enter your zones here, e.g., Backend, Frontend, Infra]
+> **Number of People & Roles:** [Enter the number of people and their roles, e.g., 2 Backend Devs, 1 DevOps]
+>
+> Please output a ONEFORALL YAML `zones` configuration mapping these to directories and owners."
+
 ---
 
 ### `GEMINI.md` — What Gemini / Antigravity sees
